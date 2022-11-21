@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	source  = flag.String("kape", "./kape", "Directory where Tkape files are located")
-	output  = flag.String("orc", "./orc", "Output Directory to write Orc config files")
-	master  = flag.String("master", "./kape/Compound/!SANS_Triage.tkape", "Master Tkape file")
-	verbose = flag.Bool("verbose", false, "Verbose mode")
+	source      = flag.String("kape", "./kape", "Directory where Tkape files are located")
+	output      = flag.String("orc", "./orc", "Output Directory to write Orc config files")
+	master      = flag.String("master", "./kape/Compound/!SANS_Triage.tkape", "Master Tkape file")
+	keep_unused = flag.Bool("keep_unused", false, "Keep unused files in the output directory")
+	verbose     = flag.Bool("verbose", false, "Verbose mode")
 )
 
 func handleErr(err error) {
@@ -212,7 +213,7 @@ func ConvertGetThis(kapefile KapeFile) []byte {
 func ConvertWolf(kapefile KapeFile) []byte {
 	var wolfConfig Wolf
 	var archive Archive
-	archive.Name = kapefile.Name
+	archive.Name = kapefile.Name + ".7z"
 	archive.Keyword = kapefile.Name
 	archive.Compression = "fast"
 	archive.Repeat = "Once"
@@ -283,8 +284,10 @@ func Export(kapefiles []KapeFile) {
 		} else if IsCompound(kapefile) {
 			data = ConvertWolf(kapefile)
 		} else {
-			log.Println("Error: Failed to Export " + kapefile.Name)
-			log.Println("Error: ", kapefile.Targets)
+			if *verbose {
+				log.Println("Error: Failed to Export " + kapefile.Name)
+				log.Println("Error: ", kapefile.Targets)
+			}
 		}
 
 		if len(data) > 0 {
@@ -470,7 +473,9 @@ func Flatten(kapefiles []KapeFile, toFlatten KapeFile) KapeFile {
 				}
 			}
 			if !found {
-				log.Println("Warn: could not find " + target.Path + " for flattening " + toFlatten.Name + ". Skipping...")
+				if *verbose {
+					log.Println("Warn: could not find " + target.Path + " for flattening " + toFlatten.Name + ". Skipping...")
+				}
 				toDelete = append(toDelete, i)
 			}
 		}
@@ -495,7 +500,23 @@ func ConvertCompound(kapefiles []KapeFile) []KapeFile {
 	return kapefiles
 }
 
+func GetUsedKapefile(kapefiles []KapeFile, kapefile KapeFile) []KapeFile {
+	used_kapefiles := []KapeFile{}
+	for _, target := range kapefile.Targets {
+		if strings.Contains(target.Path, ".tkape") {
+			for _, k := range kapefiles {
+				if k.Name+".tkape" == target.Path {
+					used_kapefiles = append(used_kapefiles, k)
+				}
+			}
+		}
+	}
+	return used_kapefiles
+}
+
 func main() {
+	var toolEmbed Toolembed
+
 	flag.Parse()
 
 	master_kape := ParseKape(*master)
@@ -505,11 +526,19 @@ func main() {
 		kapefiles := ParseKapeDirectory(*source, *master)
 		kapefiles = ConvertCompound(kapefiles)
 
-		Export(kapefiles)
+		if *keep_unused {
+			Export(kapefiles)
+			toolEmbed = GenerateEmbed(kapefiles, master_kape)
+
+		} else {
+			used_kapefiles := GetUsedKapefile(kapefiles, master_kape)
+			Export(used_kapefiles)
+			toolEmbed = GenerateEmbed(used_kapefiles, master_kape)
+		}
+
 		Export([]KapeFile{master_kape})
 
 		// Generate the embed file
-		toolEmbed := GenerateEmbed(kapefiles, master_kape)
 		data, err := xml.MarshalIndent(toolEmbed, "", "  ")
 		handleErr(err)
 		err = ioutil.WriteFile(*output+"/DFIR-ORC_embed.xml", data, 0644)
