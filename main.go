@@ -422,6 +422,8 @@ func ParseKapeDirectory(path string, master string) []KapeFile {
 	return kapefiles
 }
 
+// Split Mixed Kapefile into GetThis and Compound
+// Also works on GetThis compatible files.
 func SplitKape(kapefile KapeFile) (KapeFile, KapeFile) {
 	var compound KapeFile
 	var getthis KapeFile
@@ -433,7 +435,7 @@ func SplitKape(kapefile KapeFile) (KapeFile, KapeFile) {
 	compound.Version = kapefile.Version
 
 	getthis.Name = kapefile.Name + "_getthis"
-	getthis.Path = kapefile.Path + "_getthis"
+	getthis.Path = strings.Replace(kapefile.Path, ".tkape", "_getthis.tkape", 1)
 	getthis.Description = kapefile.Description
 	getthis.Author = kapefile.Author
 	getthis.Version = kapefile.Version
@@ -445,6 +447,13 @@ func SplitKape(kapefile KapeFile) (KapeFile, KapeFile) {
 			getthis.Targets = append(getthis.Targets, target)
 		}
 	}
+
+	// Add Target to Compound to reference GetThis
+	var getthis_target Target
+	getthis_target.Name = getthis.Name
+	getthis_target.Path = getthis.Name + ".tkape"
+	compound.Targets = append(compound.Targets, getthis_target)
+
 	return compound, getthis
 }
 
@@ -544,7 +553,26 @@ func main() {
 		err = ioutil.WriteFile(*output+"/DFIR-ORC_embed.xml", data, 0644)
 		handleErr(err)
 	} else {
-		log.Fatal("The master kape file is not a Compound")
+		master_compound, master_getthis := SplitKape(master_kape)
+		kapefiles := ParseKapeDirectory(*source, *master)
+		kapefiles = append(kapefiles, master_getthis)
+		kapefiles = ConvertCompound(kapefiles)
+
+		if *keep_unused {
+			Export(kapefiles)
+			toolEmbed = GenerateEmbed(kapefiles, master_compound)
+		} else {
+			used_kapefiles := GetUsedKapefile(kapefiles, master_compound)
+			Export(used_kapefiles)
+			Export([]KapeFile{master_compound})
+			toolEmbed = GenerateEmbed(used_kapefiles, master_compound)
+		}
+
+		// Generate the embed file
+		data, err := xml.MarshalIndent(toolEmbed, "", "  ")
+		handleErr(err)
+		err = ioutil.WriteFile(*output+"/DFIR-ORC_embed.xml", data, 0644)
+		handleErr(err)
 	}
 
 }
