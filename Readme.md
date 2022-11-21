@@ -28,4 +28,3 @@ For your information, DFIR ORC doesn't handle recursive dependencies. So when th
 ## Todo
 
 - [ ] Handle several Master files
-- [ ] Handle not Compound Master File
